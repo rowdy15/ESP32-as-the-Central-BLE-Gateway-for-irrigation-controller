@@ -41,8 +41,8 @@ IPAddress gateway(192,168,1,1);
 IPAddress subnet(255,255,255,0);
 
 // The remote service we wish to connect to.
-static BLEUUID serviceUUID("F3641400-00B0-4240-BA50-05CA45BF8ABC");
-static BLEUUID serviceUUID_battery("180F");
+static BLEUUID    serviceUUID("F3641400-00B0-4240-BA50-05CA45BF8ABC");
+static BLEUUID    serviceUUID_battery("180F");
 // The characteristic of the remote service we are interested in.
 static BLEUUID    charUUID("F3641401-00B0-4240-BA50-05CA45BF8ABC");
 static BLEUUID    charUUID_battery("2A19");
@@ -66,6 +66,7 @@ std::string myDeviceName = "Front_Garden";
 static int rssi = 0;
 
 void reconnectAndSend(String topic,String val);
+bool connectToServer(void);
 
 void publishConnection(bool isConnected) {
   String conn = "not connected";
@@ -126,6 +127,53 @@ static void notifyCallback( BLERemoteCharacteristic* pBLERemoteCharacteristic, u
   }
 }
 
+class MyClientCallback : public BLEClientCallbacks {
+  void onConnect(BLEClient* pclient) {    
+    Serial.println("We are Connected!");
+    connected = true;    
+  }
+    void onDisconnect(BLEClient* pclient) {
+    Serial.println("We have been disconnected!"); 
+   // esp_ble_remove_bond_device(myDevice->getAddress());   
+    connected = false;    
+  }
+};
+
+bool connectToServer() {
+    doConnect = false;
+    Serial.print("Forming a connection to ");
+    if(myDevice){
+      Serial.println(myDevice->getAddress().toString().c_str());
+      
+      if(!pClient){
+        pClient  = BLEDevice::createClient();    
+        pClient->setClientCallbacks(new MyClientCallback());
+        Serial.println(" - Created client");
+      }
+      // Connect to the remove BLE Server.
+      pClient->connect(myDevice);
+      if(pClient->isConnected()){
+        Serial.println(" - Connected to server");
+        connected = true;
+  
+        rssi = myDevice->getRSSI();
+  
+        if(rssi != 0){
+          if (!client.connected()){
+            reconnectAndSend(frontGardenTapRSSI,String(rssi).c_str());
+          } else{
+            client.publish(frontGardenTapRSSI,String(rssi).c_str(),true);;
+          }
+          rssi = 0;
+        }
+  
+        publishConnection(connected);
+        return true;
+      } 
+    }
+    return false;
+}
+
 /**
  * Scan for BLE servers and find the first one that advertises the service we are looking for.
  */
@@ -142,9 +190,11 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     if (advertisedDevice.getName() == myDeviceName) {
       Serial.println("We found our device!!!!");
       pBLEScan->stop();
+      
       if(!myDevice){
         myDevice = new BLEAdvertisedDevice(advertisedDevice);
         Serial.println("Setting new device as myDevice");
+        //connectToServer();
       }
       doConnect = true; 
     } else {// Found our server
@@ -153,54 +203,11 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
   } // onResult
 }; // MyAdvertisedDeviceCallbacks
 
-class MyClientCallback : public BLEClientCallbacks {
-  void onConnect(BLEClient* pclient) {    
-    Serial.println("We are Connected!");
-    connected = true;    
-  }
 
-  void onDisconnect(BLEClient* pclient) {
-    Serial.println("We have been disconnected!"); 
-   // esp_ble_remove_bond_device(myDevice->getAddress());   
-    connected = false;
-  //  const uint8_t bdAddr = myDevice->getAddress();
-    esp_ble_remove_bond_device((uint8_t*) esp_bt_dev_get_address());
-    
-  }
-};
 
-bool connectToServer() {
-    //scanForDevice();
-    Serial.print("Forming a connection to ");
-    Serial.println(myDevice->getAddress().toString().c_str());
-    rssi = myDevice->getRSSI();
-    if(!pClient){
-    pClient  = BLEDevice::createClient();    
-    pClient->setClientCallbacks(new MyClientCallback());
-    Serial.println(" - Created client");
-    }
-    // Connect to the remove BLE Server.
-    pClient->connect(myDevice);
-    if(pClient->isConnected()){
-      Serial.println(" - Connected to server");
-      connected = true;
 
-      
 
-    if(rssi != 0){
-      if (!client.connected()){
-        reconnectAndSend(frontGardenTapRSSI,String(rssi).c_str());
-      } else{
-        client.publish(frontGardenTapRSSI,String(rssi).c_str(),true);;
-      }
-      rssi = 0;
-    }
 
-    publishConnection(connected);
-      return true;
-    } 
-    return false;
-}
 
 bool obtainServiceHandle(BLEUUID serviceUUID) {
     // Obtain a reference to the service we are after in the remote BLE server.
@@ -330,14 +337,15 @@ void getTapState(void) {
 }
 
 void scanForDevice(void) {
+  Serial.println("scanning for device");
   if(!pBLEScan){
     pBLEScan = BLEDevice::getScan();
     pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   }
-  pBLEScan->setInterval(100);
-  pBLEScan->setWindow(6400);
+  pBLEScan->setInterval(50);
+  pBLEScan->setWindow(4000);
   pBLEScan->setActiveScan(false);
-  pBLEScan->start(20, false);
+  pBLEScan->start(1800, false);
 }
 
 
@@ -542,18 +550,15 @@ void setup() {
 
 // This is the Arduino main loop function.
 void loop() {
-//  if(WiFi.status() != WL_CONNECTED){
-//    WiFi.disconnect();
-//    WiFi.mode(WIFI_AP_STA);
-//    WiFi.begin(ssid, password);
-//  }
-
   ArduinoOTA.handle();
-
   if(connected){
   if (!client.connected()) { reconnect(); } // check if pubsubclient is connected to broker before entering loop method
   client.loop();// pubsubclient loopchecking method
   } else {
-    connectToServer();
+    if (doConnect) {
+      connectToServer();
+    } else {
+      scanForDevice();    
+    }
   }
 } // End of loop
