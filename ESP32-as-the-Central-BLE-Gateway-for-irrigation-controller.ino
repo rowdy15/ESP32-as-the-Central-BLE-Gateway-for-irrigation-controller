@@ -2,7 +2,7 @@
 #include "BLEDevice.h"
 #include "BLEScan.h"
 #include <EEPROM.h>
-
+//#include <string.h>
 #include <Wire.h>
 #include <WiFi.h>
 //extern "C" {
@@ -87,13 +87,28 @@ static BLEScan* pBLEScan;
 std::string myDeviceName = "Front_Garden";
 static int rssi = 0;
 
+void connectToMqtt();
+
+
+int getTapState(void) {
+      obtainServiceHandle(serviceUUID);
+      obtainCharacteristicHandle(charUUID);     
+      int timeLeft = static_cast<uint32_t>(pRemoteCharacteristic->readUInt8());
+      Serial.print("The read time left is ");
+      Serial.println(timeLeft);
+      mqttClient.publish(frontGardenTapMinutesLeft,0,false,String(timeLeft).c_str());
+
+      return timeLeft;
+
+}
+
 class MyClientCallback : public BLEClientCallbacks {
   void onConnect(BLEClient* pclient) {    
     Serial.println("We are Connected!");
-    ble_connected = true;    
-    mqttClient.publish(frontGardenTapConnection,0,true,"connected");
+    ble_connected = true;      
+    mqttClient.publish(frontGardenTapConnection,0,false,"connected");
     rssi = myDevice->getRSSI();    
-    mqttClient.publish(frontGardenTapRSSI,0,true,String(rssi).c_str());
+    mqttClient.publish(frontGardenTapRSSI,0,false,String(rssi).c_str());
   }
   void onDisconnect(BLEClient* pclient) {
     Serial.println("We have been disconnected!");   
@@ -208,17 +223,6 @@ void setTapState(uint8_t state) {
       pRemoteCharacteristic->writeValue(state, true);
       //Serial.println("Tap is set to \"" + String(state) + "\"");
     }
-}
-
-void getTapState(void) {
-  if (ble_connected){
-    obtainServiceHandle(serviceUUID);
-    obtainCharacteristicHandle(charUUID);
-    std::string val = readCharacteristicValue(charUUID);
-    Serial.print("tap state: ");
-    Serial.println(val.c_str());
-    mqttClient.publish(frontGardenTapState,0,true,val.c_str());      
-  }
 }
 
 void registerForNotifications(void) {
@@ -458,6 +462,7 @@ void onMqttConnect(bool sessionPresent) {
   delay(10);
   uint16_t packetIdSub3 = mqttClient.subscribe(frontGardenTapConnectionSet,0);
   delay(10);
+  mqttClient.publish(frontGardenTapConnection,0,true,"not connected");
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
@@ -511,6 +516,10 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
         if(pClient != nullptr && pClient->connect(myDevice)){
           Serial.println("disabling feedWDT");
           feedWDT = 0;   
+          int timeLeft = getTapState();
+          if (timeLeft != 0) {
+            enableTapNotifications();
+          }
         }
       }
     } else if (t == frontGardenTapConnectionSet && s == "disconnect" ) { //register notifications on battery service
@@ -545,6 +554,8 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
         changeBatteryReadFrequency((uint8_t) s.toInt());   
     } else if (s == "reset_esp"){
       ESP.restart();
+    } else if (s == "get_time_left"){
+      getTapState();
     }
 }
 
@@ -588,7 +599,16 @@ void setup() {
 // This is the Arduino main loop function.
 void loop() {
 ArduinoOTA.handle();
-if(feedWDT){
+//  unsigned long currentMillis = millis();
+//
+//  if (currentMillis - previousMillis >= 2000) {
+//    // save the last time you blinked the LED
+//    previousMillis = currentMillis;
+//
+//    Serial.println("still up");
+//  }
+
+if(feedWDT){    // This is enabled during connection to ble server as it take a long time to connect.
   resetWDT();
 }
 
