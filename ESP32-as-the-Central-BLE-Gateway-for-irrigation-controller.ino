@@ -171,8 +171,8 @@ void scanForDevice(void) {
     pBLEScan = BLEDevice::getScan();
     pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   }
-  pBLEScan->setInterval(10);
-  pBLEScan->setWindow(10);
+  pBLEScan->setInterval(100);
+  pBLEScan->setWindow(100);
   pBLEScan->setActiveScan(true);
   pBLEScan->start(1800, false);
 }
@@ -290,22 +290,17 @@ void disableBatteryCheckFrequencyNotifications(void){
 }
 
 void changeBatteryReadFrequency(uint8_t frequency) {
-    if(frequency ==  0){
-      disableBatteryNotifications();
-      //battery_notifications = false;
-    } else {
-      enableBatteryNotifications();
+
 
     obtainServiceHandle(serviceUUID_btry_freq);
     obtainCharacteristicHandle(charUUID_btry_freq);
     
-    if(!frequency_notify_enabled){
-      enableBatteryCheckFrequencyNotifications();
-      frequency_notify_enabled = true;
-    }
-      if(pClient->isConnected() && pRemoteService != nullptr){
-        pRemoteCharacteristic->writeValue(frequency,true);
-      }
+//    if(!frequency_notify_enabled){
+//      enableBatteryCheckFrequencyNotifications();
+//      frequency_notify_enabled = true;
+//    }
+    if(pClient->isConnected() && pRemoteService != nullptr){
+      pRemoteCharacteristic->writeValue(frequency,true);
     }
 }
 
@@ -346,7 +341,7 @@ static void notifyCallback( BLERemoteCharacteristic* pBLERemoteCharacteristic, u
 
     switch (frqncy){
       case 0:
-            Serial.println("frequency changed to 1 minute");
+            Serial.println("frequency changed to off");
             mqttClient.publish(frontGardenTapBtryFreq,0,true,"off");
         break;
       case 1:
@@ -549,9 +544,13 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     } else if (s == "disable_frequency_notify" ) { //register notifications on battery service
       disableBatteryCheckFrequencyNotifications(); 
     } else if (String(frontGardenTapBtryFreqSet) == t) {
-        //Serial.println("The battery check frequency will be set");
-        //Serial.println("topic is" + t);
-        changeBatteryReadFrequency((uint8_t) s.toInt());   
+      if(s.toInt() ==  0){
+        disableBatteryNotifications();
+      } else {
+        disableBatteryNotifications();
+        changeBatteryReadFrequency((uint8_t) s.toInt());
+        enableBatteryNotifications();        
+      }           
     } else if (s == "reset_esp"){
       ESP.restart();
     } else if (s == "get_time_left"){
